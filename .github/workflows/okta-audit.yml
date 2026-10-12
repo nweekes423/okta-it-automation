@@ -4,6 +4,7 @@ on:
   schedule:
     # Run weekdays at 2 PM UTC
     - cron: '0 14 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   audit:
