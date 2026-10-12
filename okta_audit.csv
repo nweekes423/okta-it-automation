@@ -1,0 +1,7 @@
+id,login,name,email,status,created,last_login,days_since_login,groups,mfa_factors,has_mfa,stale
+00u18dr0awu28m6BX698,sarah.kim@ai.com,Sarah Kim,sarah.kim@ai.com,STAGED,2026-10-05T17:21:48.000Z,,,Everyone; IT,,False,False
+00u18dqlkhlqf7euW698,alex.chen@ai.com,Alex Chen,alex.chen@ai.com,PROVISIONED,2026-10-05T17:16:06.000Z,,,Everyone,,False,False
+00u18dqz797xLGKkI698,daniel.park@ai.com,Daniel Park,daniel.park@ai.com,PROVISIONED,2026-10-05T17:23:03.000Z,,,Engineering; Everyone,,False,False
+00u18dpcgl9bLATT1698,william@ai4brothersandsisters.com,Norman Weekes,william@ai4brothersandsisters.com,ACTIVE,2026-10-05T16:48:18.000Z,2026-10-12T21:18:45.000Z,0,All-Employees; Engineering; Everyone; Finance; IT,signed_nonce:OKTA; token:software:totp:OKTA,True,False
+00u18dr01wrALIE3e698,james.lee@ai.com,James Lee,james.lee@ai.com,PASSWORD_EXPIRED,2026-10-05T17:22:22.000Z,,,Engineering; Everyone,,False,False
+00u18dr2cawPDKac1698,emily.wong@ai.com,Emily Wong,emily.wong@ai.com,PASSWORD_EXPIRED,2026-10-05T17:22:42.000Z,,,Engineering; Everyone,,False,False
