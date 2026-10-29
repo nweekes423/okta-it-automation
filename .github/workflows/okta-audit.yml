@@ -6,20 +6,43 @@ on:
     - cron: '0 14 * * 1-5'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  audit:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bb5b2a3b5ce739c4a6bb04308e92299
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@f677139507b7355b9ff833d49e3c9e0b1e1d598d
         with:
-          python-version: '3.x'
+          python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest test_okta_audit.py -v
+
+  audit:
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bb5b2a3b5ce739c4a6bb04308e92299
+
+      - name: Set up Python
+        uses: actions/setup-python@f677139507b7355b9ff833d49e3c9e0b1e1d598d
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       - name: Run Okta audit
         env:
@@ -28,7 +51,8 @@ jobs:
         run: python okta_audit.py --stale-days 30 --output okta_audit.csv
 
       - name: Upload audit CSV as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea58fc8650134ea8d2a026a8b
+        if: success()
         with:
           name: okta-audit
           path: okta_audit.csv
