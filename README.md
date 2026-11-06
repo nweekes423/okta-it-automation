@@ -1,6 +1,6 @@
 # Okta IT Automation
 
-A collection of tools and workflows for automating Okta identity management tasks, including user auditing and offboarding automation.
+A collection of tools and workflows for automating Okta identity management tasks, including user auditing, stale-account remediation, and offboarding automation.
 
 ## Problem Statement
 
@@ -89,7 +89,22 @@ An Okta Workflows automation that:
 **Implementation:** Okta Workflows (no-code automation platform, flopack format)
 **Documentation:** See [flows/OFFBOARDING_WORKFLOW.md](flows/OFFBOARDING_WORKFLOW.md)
 
-### 3. GitHub Actions Integration
+### 3. Stale-Account Remediation (`okta_remediate.py`)
+
+The enforcement half of the audit pipeline. Reads the audit CSV and remediates stale ACTIVE accounts through the Okta lifecycle API:
+
+1. Revokes all active sessions (`DELETE /users/{id}/sessions`)
+2. Optionally removes enrolled MFA factors (`DELETE /users/{id}/factors/{fid}`)
+3. Deactivates the user (`POST /users/{id}/lifecycle/deactivate`)
+
+**Safety model:**
+- **Dry-run by default** — nothing changes unless `--execute` is passed
+- `--exclude` protects accounts by login substring (service accounts, break-glass admins)
+- `--only` scopes remediation to specific logins
+- Writes a per-account remediation report CSV
+- Kept as a separate script so `okta_audit.py` remains strictly read-only
+
+### 4. GitHub Actions Integration
 
 Automated CI/CD pipeline that:
 - Runs tests on every workflow execution
@@ -165,23 +180,37 @@ Expected output:
 3. The workflow will run automatically on weekdays at 2 PM UTC
 4. Trigger manually from Actions tab > Okta User Audit > Run workflow
 
-## Sample CSV Output
+### 6. Remediate Stale Accounts
 
-```csv
-id,login,name,email,status,created,last_login,days_since_login,groups,mfa_factors,has_mfa,stale
-00u123abc,john.doe@example.com,John Doe,john.doe@example.com,ACTIVE,2024-01-15T10:00:00.000Z,2024-10-10T08:30:00.000Z,2,Everyone; IT; Engineering,token:software:totp:OKTA,true,false
-00u456def,jane.smith@example.com,Jane Smith,jane.smith@example.com,ACTIVE,2024-02-01T09:00:00.000Z,2024-08-15T14:20:00.000Z,58,Everyone; HR,,true,true
-00u789ghi,bob.wilson@example.com,Bob Wilson,bob.wilson@example.com,STAGED,2024-10-01T11:00:00.000Z,,,Everyone,,false,false
+After reviewing the audit CSV, preview what would happen (safe, no changes):
+
+```bash
+python okta_remediate.py --input okta_audit.csv \
+    --exclude "admin,svc-,breakglass"
 ```
 
-*Note: This is synthetic data for demonstration purposes.*
+Then execute for real:
+
+```bash
+python okta_remediate.py --input okta_audit.csv --execute \
+    --exclude "admin,svc-,breakglass" --remove-factors \
+    --output okta_remediation.csv
+```
+
+**Note:** the API token needs `okta.users.manage` scope for lifecycle changes — a read-only token is not sufficient for `--execute`.
+
+## Sample CSV Output
+
+See `sample_audit_output.csv` for synthetic example data.
+
+*Note: Actual audit CSV files contain real user data and should never be committed to version control. Use synthetic data for documentation and demos.*
 
 ## Testing
 
 Run the test suite locally:
 
 ```bash
-pytest test_okta_audit.py -v
+pytest test_okta_audit.py test_okta_remediate.py -v
 ```
 
 Tests cover:
@@ -192,6 +221,9 @@ Tests cover:
 - CSV output and escaping
 - Missing environment variables and invalid configuration
 - Read-only safety (no state-changing API calls)
+- Remediation target selection, `--exclude`/`--only` filters
+- Remediation API call ordering and failure handling
+- Dry-run mode makes zero API calls
 
 ## CI/CD
 
@@ -228,6 +260,7 @@ The GitHub Actions workflow:
 
 ### Limitations
 - Audit script requires Okta API token with read permissions
+- Remediation requires a token with `okta.users.manage` scope and is never run by CI
 - Offboarding workflow requires Okta Workflows subscription
 - GitHub Actions artifacts are accessible to repo collaborators
 - No encryption at rest for CSV artifacts
@@ -281,6 +314,13 @@ The GitHub Actions workflow:
 - **Action:** Creates Jira ticket (read from Okta, write to Jira)
 - **Frequency:** Event-driven, per user deactivation
 
+**Remediation Script (`okta_remediate.py`):**
+- **Purpose:** Act on stale accounts found by the audit
+- **Trigger:** Manual CLI, after human review of the audit CSV
+- **Output:** Remediation report CSV
+- **Action:** Revokes sessions, optionally removes MFA factors, deactivates users
+- **Safety:** Dry-run by default; `--execute` required; `--exclude`/`--only` scoping
+
 ## Engineering Decisions
 
 ### Pagination Strategy
@@ -291,6 +331,8 @@ Okta returns HTTP 429 with either `Retry-After` (seconds) or `X-Rate-Limit-Reset
 
 ### Least Privilege
 The audit script uses only GET requests and requires only read permissions on Okta API. No write operations (POST, PUT, DELETE) are performed, ensuring it cannot accidentally modify user state, deactivate accounts, or change security policies.
+
+The remediation script is deliberately separated from the audit so that read-only monitoring and state-changing enforcement have different credentials, different review gates, and different blast radii. Remediation requires an explicit `--execute` flag, a token with `okta.users.manage` scope, and human review of the audit CSV before it runs. `--exclude` patterns protect service accounts and break-glass credentials from bulk actions.
 
 ### Testing Without Live Credentials
 All tests use mocked HTTP responses via `pytest-mock`. This allows CI to run without access to real Okta or Jira tenants, enables edge case testing (rate limits, malformed responses), and prevents credential exposure in test logs.
