@@ -316,6 +316,95 @@ class TestAudit:
         assert result[0]["stale"] is True
         assert result[0]["has_mfa"] is True  # Has MFA but still stale
 
+    @patch('okta_audit.user_groups')
+    @patch('okta_audit.user_factors')
+    @patch('okta_audit.paginate')
+    def test_stalled_provisioned_account(self, mock_paginate, mock_factors, mock_groups):
+        """PROVISIONED user older than threshold is stalled, not stale."""
+        now = datetime.now(timezone.utc)
+        mock_paginate.return_value = [
+            {
+                "id": "user789",
+                "status": "PROVISIONED",
+                "lastLogin": None,
+                "created": (now - timedelta(days=60)).isoformat().replace("+00:00", "Z"),
+                "profile": {
+                    "login": "stuck@example.com",
+                    "firstName": "Stuck",
+                    "lastName": "Onboarding",
+                    "email": "stuck@example.com"
+                }
+            }
+        ]
+        mock_groups.return_value = ["Everyone"]
+        mock_factors.return_value = []
+
+        mock_session = Mock()
+        result = okta_audit.audit(mock_session, "https://test.okta.com", 30)
+
+        assert len(result) == 1
+        assert result[0]["stale"] is False
+        assert result[0]["stalled"] is True
+
+    @patch('okta_audit.user_groups')
+    @patch('okta_audit.user_factors')
+    @patch('okta_audit.paginate')
+    def test_recent_provisioned_not_stalled(self, mock_paginate, mock_factors, mock_groups):
+        """PROVISIONED user younger than threshold is not stalled."""
+        now = datetime.now(timezone.utc)
+        mock_paginate.return_value = [
+            {
+                "id": "user790",
+                "status": "PROVISIONED",
+                "lastLogin": None,
+                "created": (now - timedelta(days=5)).isoformat().replace("+00:00", "Z"),
+                "profile": {
+                    "login": "new@example.com",
+                    "firstName": "New",
+                    "lastName": "Hire",
+                    "email": "new@example.com"
+                }
+            }
+        ]
+        mock_groups.return_value = ["Everyone"]
+        mock_factors.return_value = []
+
+        mock_session = Mock()
+        result = okta_audit.audit(mock_session, "https://test.okta.com", 30)
+
+        assert len(result) == 1
+        assert result[0]["stalled"] is False
+
+    @patch('okta_audit.user_groups')
+    @patch('okta_audit.user_factors')
+    @patch('okta_audit.paginate')
+    def test_deprovisioned_never_stalled(self, mock_paginate, mock_factors, mock_groups):
+        """DEPROVISIONED is a terminal state, never flagged as stalled."""
+        now = datetime.now(timezone.utc)
+        mock_paginate.return_value = [
+            {
+                "id": "user791",
+                "status": "DEPROVISIONED",
+                "lastLogin": None,
+                "created": (now - timedelta(days=365)).isoformat().replace("+00:00", "Z"),
+                "profile": {
+                    "login": "gone@example.com",
+                    "firstName": "Gone",
+                    "lastName": "User",
+                    "email": "gone@example.com"
+                }
+            }
+        ]
+        mock_groups.return_value = []
+        mock_factors.return_value = []
+
+        mock_session = Mock()
+        result = okta_audit.audit(mock_session, "https://test.okta.com", 30)
+
+        assert len(result) == 1
+        assert result[0]["stalled"] is False
+        assert result[0]["stale"] is False
+
 
 class TestWriteCsv:
     """Test CSV writing."""

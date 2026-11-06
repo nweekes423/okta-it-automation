@@ -66,6 +66,7 @@ graph TB
 A read-only Python script that:
 - Exports all Okta users with status, last login, group membership, and MFA factors to CSV
 - Flags ACTIVE accounts that haven't logged in within a configurable threshold (default: 30 days)
+- Flags STALLED accounts — non-ACTIVE users stuck in transitional states (PROVISIONED, RECOVERY, PASSWORD_EXPIRED, LOCKED_OUT) longer than the threshold — which need human investigation rather than automated remediation
 - Identifies users without MFA enrolled
 - Uses Okta's API with rate limiting (HTTP 429 with Retry-After), pagination, and retry logic
 - Returns nonzero exit codes on failures for CI integration
@@ -77,6 +78,7 @@ A read-only Python script that:
 - Stable CSV column ordering
 - Error counting and reporting
 - Never makes state-changing API calls
+- Distinguishes `stale` (ACTIVE, gone quiet → remediation candidate) from `stalled` (non-ACTIVE, aging in a bad state → investigation candidate)
 
 ### 2. Okta-to-Jira Offboarding Workflow
 

@@ -40,6 +40,11 @@ import requests
 TIMEOUT = 30
 MAX_RETRIES = 5
 
+# Non-ACTIVE statuses that indicate a lifecycle that stalled partway through.
+# These are not remediation candidates like stale ACTIVE accounts; they need
+# human investigation (failed onboarding, expired password, locked account).
+STALLED_STATUSES = {"PROVISIONED", "RECOVERY", "PASSWORD_EXPIRED", "LOCKED_OUT"}
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -177,17 +182,26 @@ def audit(session: requests.Session, base: str, stale_days: int) -> List[Dict[st
         try:
             profile = u.get("profile", {})
             last_login = parse_time(u.get("lastLogin"))
+            created = parse_time(u.get("created"))
+            status = u.get("status", "")
             groups = user_groups(session, base, u["id"])
             factors = user_factors(session, base, u["id"])
-            active = u.get("status") == "ACTIVE"
+            active = status == "ACTIVE"
             stale = active and (last_login is None or last_login < cutoff)
+            # Stalled: non-ACTIVE account sitting in a transitional state for
+            # longer than the threshold, measured from creation date.
+            stalled = (
+                status in STALLED_STATUSES
+                and created is not None
+                and created < cutoff
+            )
 
             rows.append({
                 "id": u.get("id", ""),
                 "login": profile.get("login", ""),
                 "name": f"{profile.get('firstName', '')} {profile.get('lastName', '')}".strip(),
                 "email": profile.get("email", ""),
-                "status": u.get("status", ""),
+                "status": status,
                 "created": u.get("created", ""),
                 "last_login": u.get("lastLogin") or "",
                 "days_since_login": (now - last_login).days if last_login else "",
@@ -195,6 +209,7 @@ def audit(session: requests.Session, base: str, stale_days: int) -> List[Dict[st
                 "mfa_factors": "; ".join(factors),
                 "has_mfa": bool(factors),
                 "stale": stale,
+                "stalled": stalled,
             })
         except Exception as e:
             errors += 1
@@ -217,7 +232,7 @@ def write_csv(rows: List[Dict[str, Any]], path: str) -> None:
             fieldnames = [
                 "id", "login", "name", "email", "status", "created",
                 "last_login", "days_since_login", "groups", "mfa_factors",
-                "has_mfa", "stale"
+                "has_mfa", "stale", "stalled"
             ]
             writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
@@ -232,10 +247,12 @@ def summarize(rows: List[Dict[str, Any]], stale_days: int, errors: int = 0) -> N
     """Print audit summary."""
     active = [r for r in rows if r.get("status") == "ACTIVE"]
     stale_count = sum(1 for r in rows if r.get("stale", False))
+    stalled_count = sum(1 for r in rows if r.get("stalled", False))
     no_mfa_count = sum(1 for r in active if not r.get("has_mfa", False))
 
     logger.info(f"Users: {len(rows)}  Active: {len(active)}")
     logger.info(f"Stale (>{stale_days} days or never logged in): {stale_count}")
+    logger.info(f"Stalled (non-ACTIVE >{stale_days} days): {stalled_count}")
     logger.info(f"Active without MFA: {no_mfa_count}")
     if errors > 0:
         logger.warning(f"Errors encountered: {errors}")
