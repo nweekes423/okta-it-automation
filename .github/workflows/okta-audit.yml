@@ -15,10 +15,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout code
-        uses: actions/checkout@11bd71901bb5b2a3b5ce739c4a6bb04308e92299
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
 
       - name: Set up Python
-        uses: actions/setup-python@f677139507b7355b9ff833d49e3c9e0b1e1d598d
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
 
@@ -34,10 +34,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@11bd71901bb5b2a3b5ce739c4a6bb04308e92299
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
 
       - name: Set up Python
-        uses: actions/setup-python@f677139507b7355b9ff833d49e3c9e0b1e1d598d
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
 
@@ -51,7 +51,7 @@ jobs:
         run: python okta_audit.py --stale-days 30 --output okta_audit.csv
 
       - name: Upload audit CSV as artifact
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea58fc8650134ea8d2a026a8b
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: success()
         with:
           name: okta-audit
