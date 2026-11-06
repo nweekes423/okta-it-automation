@@ -68,6 +68,7 @@ logger = logging.getLogger(__name__)
 REQUIRED_COLUMNS = {"id", "login", "name", "status", "stale"}
 
 
+# HTTP request helper with retry/backoff for writes (DELETE/POST), mirroring the GET-only helper in okta_audit.
 def api_request(
     session: requests.Session,
     method: str,
@@ -116,6 +117,7 @@ def api_request(
     raise RuntimeError(f"Failed after {MAX_RETRIES} retries: {method} {url}")
 
 
+# Read the CSV produced by okta_audit.py and verify it has the columns we need.
 def load_audit_csv(path: str) -> List[Dict[str, str]]:
     """Load rows from an okta_audit.py CSV output file."""
     try:
@@ -130,12 +132,18 @@ def load_audit_csv(path: str) -> List[Dict[str, str]]:
         raise
 
 
+# Decide which CSV rows are safe to remediate: must be stale + ACTIVE, minus --exclude hits, optionally narrowed by --only.
 def select_targets(
     rows: List[Dict[str, str]],
     exclude: Optional[List[str]] = None,
     only: Optional[List[str]] = None,
 ) -> List[Dict[str, str]]:
-    """Pick stale ACTIVE rows, honoring --exclude substrings and --only logins."""
+    """Pick stale ACTIVE rows, honoring --exclude substrings and --only logins.
+
+    --exclude is the safety rail for bulk runs: any login containing one
+    of the substrings (e.g. "admin", "svc-") is skipped. --only narrows
+    the run to specific accounts for testing or single-user remediation.
+    """
     exclude = [e.lower() for e in (exclude or [])]
     only = {o.lower() for o in (only or [])}
     targets = []
@@ -146,6 +154,8 @@ def select_targets(
             continue
         login = row.get("login", "")
         login_l = login.lower()
+        # --only matches on substring too, so "test.user" also catches
+        # "test.user2@..." — use the full login when precision matters.
         if only and login_l not in only and not any(o in login_l for o in only):
             continue
         if any(e in login_l for e in exclude):
@@ -155,6 +165,7 @@ def select_targets(
     return targets
 
 
+# Fetch the IDs of a user's ACTIVE MFA factors so they can be deleted individually.
 def user_factor_ids(session: requests.Session, base: str, user_id: str) -> List[str]:
     """Fetch IDs of a user's ACTIVE MFA factors."""
     ids = []
@@ -168,6 +179,7 @@ def user_factor_ids(session: requests.Session, base: str, user_id: str) -> List[
     return ids
 
 
+# Execute the remediation sequence for one user: revoke sessions, remove factors (optional), deactivate.
 def remediate_user(
     session: requests.Session,
     base: str,
@@ -180,6 +192,10 @@ def remediate_user(
     """
     result: Dict[str, Any] = {"actions": [], "error": None}
 
+    # Order matters: cut off access FIRST (sessions, factors), then change
+    # lifecycle state. If deactivation succeeded but revocation failed,
+    # the account would be inactive but sessions could linger — so we
+    # abort on revocation failure rather than proceed.
     try:
         api_request(session, "DELETE", f"{base}/api/v1/users/{user_id}/sessions")
         result["actions"].append("sessions_revoked")
@@ -205,6 +221,7 @@ def remediate_user(
     return result
 
 
+# Write per-account remediation results to a CSV audit trail.
 def write_report(rows: List[Dict[str, Any]], path: str) -> None:
     """Write remediation results to CSV."""
     fieldnames = ["login", "name", "email", "days_since_login", "actions", "error"]
@@ -219,6 +236,7 @@ def write_report(rows: List[Dict[str, Any]], path: str) -> None:
         raise
 
 
+# Split a comma-separated CLI argument into a clean list of strings.
 def parse_list(value: Optional[str]) -> Optional[List[str]]:
     """Split a comma-separated CLI arg into a list."""
     if not value:
@@ -226,6 +244,7 @@ def parse_list(value: Optional[str]) -> Optional[List[str]]:
     return [v.strip() for v in value.split(",") if v.strip()]
 
 
+# CLI entry point: dry-run by default; --execute performs the changes.
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(

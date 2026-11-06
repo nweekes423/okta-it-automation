@@ -53,12 +53,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Sanity-check that OKTA_ORG_URL is a real Okta org URL before making any calls.
 def validate_okta_url(url: str) -> bool:
     """Validate Okta organization URL format."""
     pattern = r'^https://[a-zA-Z0-9-]+\.okta\.com$'
     return bool(re.match(pattern, url.rstrip('/')))
 
 
+# Build a requests session authenticated with an Okta SSWS API token.
 def make_session(token: str) -> requests.Session:
     """Create an authenticated requests session."""
     if not token:
@@ -68,6 +70,7 @@ def make_session(token: str) -> requests.Session:
     return s
 
 
+# GET with retry logic for Okta rate limits (429) and transient network errors.
 def api_get(session: requests.Session, url: str, params: Optional[Dict] = None) -> requests.Response:
     """GET with retry logic for Okta rate limiting (HTTP 429) and transient errors."""
     for attempt in range(MAX_RETRIES):
@@ -102,6 +105,7 @@ def api_get(session: requests.Session, url: str, params: Optional[Dict] = None) 
     raise RuntimeError(f"Failed after {MAX_RETRIES} retries: {url}")
 
 
+# Follow Okta's Link-header pagination until every item on a list endpoint is collected.
 def paginate(session: requests.Session, url: str, params: Optional[Dict] = None) -> List[Dict]:
     """Yield items from a paginated Okta list endpoint (follows Link: next)."""
     items = []
@@ -119,6 +123,7 @@ def paginate(session: requests.Session, url: str, params: Optional[Dict] = None)
     return items
 
 
+# Parse an ISO-8601 timestamp into a datetime; returns None on missing/invalid input.
 def parse_time(value: Optional[str]) -> Optional[datetime]:
     """Parse ISO 8601 timestamp to datetime."""
     if not value:
@@ -130,6 +135,7 @@ def parse_time(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+# Fetch the names of all groups a user belongs to.
 def user_groups(session: requests.Session, base: str, user_id: str) -> List[str]:
     """Fetch group names for a user."""
     names = []
@@ -144,6 +150,7 @@ def user_groups(session: requests.Session, base: str, user_id: str) -> List[str]
     return sorted(names)
 
 
+# Fetch a user's ACTIVE MFA factors as readable strings like "token:software:totp:OKTA".
 def user_factors(session: requests.Session, base: str, user_id: str) -> List[str]:
     """Fetch active MFA factors for a user."""
     out = []
@@ -162,6 +169,7 @@ def user_factors(session: requests.Session, base: str, user_id: str) -> List[str
     return sorted(out)
 
 
+# Walk every user in the org and build the audit rows with stale/stalled/MFA flags.
 def audit(session: requests.Session, base: str, stale_days: int) -> List[Dict[str, Any]]:
     """Perform audit of Okta users."""
     now = datetime.now(timezone.utc)
@@ -221,6 +229,7 @@ def audit(session: requests.Session, base: str, stale_days: int) -> List[Dict[st
     return rows
 
 
+# Write audit rows to CSV with a stable column order.
 def write_csv(rows: List[Dict[str, Any]], path: str) -> None:
     """Write audit results to CSV file."""
     if not rows:
@@ -243,6 +252,7 @@ def write_csv(rows: List[Dict[str, Any]], path: str) -> None:
         raise
 
 
+# Print headline counts for the audit run.
 def summarize(rows: List[Dict[str, Any]], stale_days: int, errors: int = 0) -> None:
     """Print audit summary."""
     active = [r for r in rows if r.get("status") == "ACTIVE"]
@@ -258,6 +268,7 @@ def summarize(rows: List[Dict[str, Any]], stale_days: int, errors: int = 0) -> N
         logger.warning(f"Errors encountered: {errors}")
 
 
+# CLI entry point: read env vars, run the audit, write CSV, print summary.
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Read-only Okta user audit to CSV.")

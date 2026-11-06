@@ -51,6 +51,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Check that KANDJI_URL looks like a real Kandji/Iru API host (https + kandji/iru in the domain).
 def validate_kandji_url(url: str) -> bool:
     """Validate Kandji/Iru API base URL format."""
     url = url.rstrip("/")
@@ -60,6 +61,7 @@ def validate_kandji_url(url: str) -> bool:
     return "kandji" in host or "iru" in host
 
 
+# Build a requests session that authenticates with a Bearer token, like a browser already logged in.
 def make_session(token: str) -> requests.Session:
     """Create an authenticated requests session (Bearer token)."""
     if not token:
@@ -69,11 +71,14 @@ def make_session(token: str) -> requests.Session:
     return s
 
 
+# Page through GET /api/v1/devices until every enrolled device has been fetched.
 def paginate_devices(session: requests.Session, base: str) -> List[Dict]:
     """Fetch all devices via offset pagination (300 per page)."""
     devices = []
     offset = 0
     while True:
+        # Kandji caps pages at 300; we keep fetching until a short/empty
+        # page signals the end of the inventory.
         resp = api_get(session, f"{base}/api/v1/devices",
                        {"limit": PAGE_SIZE, "offset": offset})
         page = resp.json()
@@ -86,6 +91,7 @@ def paginate_devices(session: requests.Session, base: str) -> List[Dict]:
     return devices
 
 
+# Recursively hunt through nested JSON for the first key whose name contains a substring (used to locate FileVault in varying API shapes).
 def _find_key(obj: Any, needle: str) -> Any:
     """Recursively search a JSON structure for a key containing `needle`."""
     if isinstance(obj, dict):
@@ -103,6 +109,7 @@ def _find_key(obj: Any, needle: str) -> Any:
     return None
 
 
+# Determine whether FileVault disk encryption is on for a device; returns True/False, or None when unknown or not a Mac.
 def get_filevault(session: requests.Session, base: str, device: Dict) -> Optional[bool]:
     """Return FileVault state for a Mac, or None if unknown/not applicable.
 
@@ -111,6 +118,8 @@ def get_filevault(session: requests.Session, base: str, device: Dict) -> Optiona
     macOS-only, so non-Mac platforms return None without an API call.
     """
     platform = str(device.get("platform", "")).lower()
+    # FileVault is a macOS-only feature — Kandji doesn't report it for
+    # iPhone/iPad/Apple TV, so we skip the API call entirely for those.
     if platform and "mac" not in platform:
         return None
     direct = device.get("filevault_enabled")
@@ -120,16 +129,22 @@ def get_filevault(session: requests.Session, base: str, device: Dict) -> Optiona
     if not device_id:
         return None
     try:
+        # The details endpoint nests FileVault under security settings and
+        # the exact key varies by API version, so we search recursively.
         resp = api_get(session, f"{base}/api/v1/devices/{device_id}/details")
         raw = _find_key(resp.json(), "filevault")
         if raw is None:
             return None
         if isinstance(raw, dict):
+            # Some API versions return {"filevault": {"enabled": true}}
+            # or {"status": "ENABLED"} rather than a bare boolean.
             for k in ("enabled", "status", "value"):
                 if k in raw:
                     raw = raw[k]
                     break
         if isinstance(raw, str):
+            # Accept common truthy spellings; anything else is False-ish
+            # but we still return the parsed bool.
             return raw.strip().upper() in ("TRUE", "ENABLED", "ON", "1", "YES")
         return bool(raw)
     except requests.RequestException as e:
@@ -137,12 +152,14 @@ def get_filevault(session: requests.Session, base: str, device: Dict) -> Optiona
         return None
 
 
+# Turn "14.4.1" into (14, 4, 1) so OS versions can be compared numerically.
 def parse_os_version(version: str) -> Optional[tuple]:
     """Parse '14.4.1' into a comparable tuple of ints."""
     parts = re.findall(r"\d+", version or "")
     return tuple(int(p) for p in parts[:3]) if parts else None
 
 
+# Evaluate a single device and return its CSV row with any compliance flags; returns None for removed devices.
 def audit_device(
     session: requests.Session,
     base: str,
@@ -162,6 +179,9 @@ def audit_device(
     os_tuple = parse_os_version(str(device.get("os_version", "")))
 
     flags = []
+    # Each flag maps to a distinct finding type so the report can be
+    # grouped by cause: enrollment gaps, encryption, patch level,
+    # connectivity, and physical-device state.
     if not device.get("mdm_enabled", True):
         flags.append("mdm_disabled")
     if not device.get("agent_installed", True):
@@ -172,6 +192,8 @@ def audit_device(
         flags.append("filevault_off")
     if min_os_tuple and os_tuple and os_tuple < min_os_tuple:
         flags.append("os_below_floor")
+    # A device that never checked in OR hasn't checked in within the
+    # threshold is stale — likely retired, lost, or offline.
     if last_check_in is None or (
             isinstance(days_since, int) and days_since > stale_days):
         flags.append("stale_checkin")
@@ -197,6 +219,7 @@ def audit_device(
     }
 
 
+# Fake but realistic device inventory so the script can be demoed without a Kandji tenant.
 def demo_devices() -> List[Dict]:
     """Synthetic device inventory for --demo runs and tests."""
     now = datetime.now(timezone.utc)
@@ -263,6 +286,7 @@ def demo_devices() -> List[Dict]:
     ]
 
 
+# Write the audit rows to a CSV file with a stable column order.
 def write_csv(rows: List[Dict[str, Any]], path: str) -> None:
     """Write audit results to CSV file."""
     if not rows:
@@ -284,6 +308,7 @@ def write_csv(rows: List[Dict[str, Any]], path: str) -> None:
         raise
 
 
+# Print headline counts: total devices, flagged, noncompliant, stale check-ins.
 def summarize(rows: List[Dict[str, Any]], stale_days: int) -> None:
     """Print audit summary."""
     flagged = [r for r in rows if r.get("flags")]
@@ -297,6 +322,7 @@ def summarize(rows: List[Dict[str, Any]], stale_days: int) -> None:
                 f"{sum(1 for r in rows if 'stale_checkin' in r.get('flags', ''))}")
 
 
+# CLI entry point: parse args, load devices (real API or --demo), audit, write CSV.
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -318,6 +344,9 @@ def main() -> int:
         logger.setLevel(logging.DEBUG)
 
     if args.demo:
+        # Demo mode needs no session or base URL — audit_device only uses
+        # them for the FileVault details fallback, which demo data
+        # bypasses via the filevault_enabled field.
         session, base = None, "demo"
         devices = demo_devices()
         logger.info(f"DEMO MODE: auditing {len(devices)} synthetic devices")

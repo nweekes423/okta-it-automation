@@ -122,7 +122,22 @@ A read-only Python script that audits the Mac/iOS fleet managed by **Iru (former
 - Removed devices excluded from the report
 - Same retry/backoff conventions as the Okta audit script
 
-### 5. GitHub Actions Integration
+### 5. AI-Assisted Triage (`ai_triage.py`)
+
+A read-only analysis layer that sends audit findings to Claude and produces a prioritized triage report:
+
+- Accepts multiple audit CSVs (`--input` repeatable) and auto-detects whether each is Okta users or device data
+- Sends only aggregate counts + flagged rows to the API — not the full CSV — to keep prompts small and limit PII exposure
+- Produces a markdown report prioritizing security exposure, lifecycle hygiene, and cleanup, with recommended actions mapped to the right tool
+- Human-in-the-loop by design: it recommends, never acts — same pattern as the remediation dry-run
+- `--demo` mode generates a labeled template report with no API key
+
+**Key Features:**
+- System prompt encodes the stale-vs-stalled distinction and escalation criteria
+- Rate-limit retry on the Anthropic API
+- Model configurable via `ANTHROPIC_MODEL` env var
+
+### 6. GitHub Actions Integration
 
 Automated CI/CD pipeline that:
 - Runs tests on every workflow execution
@@ -230,6 +245,17 @@ python device_audit.py --demo --min-os 14.0 --output devices_demo.csv
 
 **Note:** create the Kandji API token with only device-list read permission (Settings > Access > API Token) — least privilege.
 
+### 8. AI Triage Report
+
+```bash
+# Needs ANTHROPIC_API_KEY env var
+python ai_triage.py --input okta_audit.csv --input device_audit.csv \
+    --output triage_report.md
+
+# No API key needed — labeled template output
+python ai_triage.py --input okta_audit.csv --demo
+```
+
 ## Sample CSV Output
 
 See `sample_audit_output.csv` for synthetic example data.
@@ -241,7 +267,7 @@ See `sample_audit_output.csv` for synthetic example data.
 Run the test suite locally:
 
 ```bash
-pytest test_okta_audit.py test_okta_remediate.py test_device_audit.py -v
+pytest test_okta_audit.py test_okta_remediate.py test_device_audit.py test_ai_triage.py -v
 ```
 
 Tests cover:
