@@ -221,3 +221,6 @@ __marimo__/
 
 # CSV output files
 *.csv
+
+# macOS
+.DS_Store

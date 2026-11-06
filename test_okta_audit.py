@@ -286,6 +286,36 @@ class TestAudit:
         assert len(result) == 1
         assert result[0]["stale"] is True
 
+    @patch('okta_audit.user_groups')
+    @patch('okta_audit.user_factors')
+    @patch('okta_audit.paginate')
+    def test_genuinely_stale_account(self, mock_paginate, mock_factors, mock_groups):
+        """Test that accounts >30 days without login are correctly flagged as stale."""
+        now = datetime.now(timezone.utc)
+        mock_paginate.return_value = [
+            {
+                "id": "user456",
+                "status": "ACTIVE",
+                "lastLogin": (now - timedelta(days=90)).isoformat().replace("+00:00", "Z"),
+                "created": (now - timedelta(days=365)).isoformat().replace("+00:00", "Z"),
+                "profile": {
+                    "login": "stale@example.com",
+                    "firstName": "Stale",
+                    "lastName": "Account",
+                    "email": "stale@example.com"
+                }
+            }
+        ]
+        mock_groups.return_value = ["Engineering"]
+        mock_factors.return_value = ["token:software:totp:OKTA"]
+
+        mock_session = Mock()
+        result = okta_audit.audit(mock_session, "https://test.okta.com", 30)
+
+        assert len(result) == 1
+        assert result[0]["stale"] is True
+        assert result[0]["has_mfa"] is True  # Has MFA but still stale
+
 
 class TestWriteCsv:
     """Test CSV writing."""

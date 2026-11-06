@@ -45,6 +45,8 @@ grep "demo-offboard" demo-baseline.csv
 
 ## Part 2: Simulate User Lifecycle Event
 
+**SECURITY NOTE:** Never commit CSV files with real user data to Git. Always use synthetic data for demos.
+
 **Option A: In a Non-Production Okta Tenant (Recommended)**
 
 1. **Create Test User:**
