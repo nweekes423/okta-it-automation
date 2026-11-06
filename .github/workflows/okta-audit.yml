@@ -26,7 +26,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests
-        run: pytest test_okta_audit.py -v
+        run: pytest -v
 
   audit:
     runs-on: ubuntu-latest
