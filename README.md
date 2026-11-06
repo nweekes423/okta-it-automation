@@ -1,6 +1,6 @@
 # Okta IT Automation
 
-A collection of tools and workflows for automating Okta identity management tasks, including user auditing, stale-account remediation, and offboarding automation.
+A collection of tools and workflows for automating identity and endpoint management, including Okta user auditing, stale-account remediation, device compliance auditing, and offboarding automation.
 
 ## Problem Statement
 
@@ -106,7 +106,23 @@ The enforcement half of the audit pipeline. Reads the audit CSV and remediates s
 - Writes a per-account remediation report CSV
 - Kept as a separate script so `okta_audit.py` remains strictly read-only
 
-### 4. GitHub Actions Integration
+### 4. Device Compliance Audit (`device_audit.py`)
+
+A read-only Python script that audits the Mac/iOS fleet managed by **Iru (formerly Kandji)**:
+
+- Pulls the full device inventory from the Kandji/Iru API (`GET /api/v1/devices`, offset-paginated)
+- Flags noncompliant devices: MDM disabled, agent missing, FileVault off (macOS only), OS below a configurable floor
+- Flags devices in Lost Mode and devices that stopped checking in
+- Exports results to CSV; `--demo` mode runs against synthetic data with no credentials
+- FileVault state comes from the per-device details endpoint, only fetched for Macs
+
+**Key Features:**
+- Bearer-token auth with read-only API token scope
+- Non-Mac devices correctly excluded from FileVault checks (field doesn't apply)
+- Removed devices excluded from the report
+- Same retry/backoff conventions as the Okta audit script
+
+### 5. GitHub Actions Integration
 
 Automated CI/CD pipeline that:
 - Runs tests on every workflow execution
@@ -121,6 +137,7 @@ Automated CI/CD pipeline that:
 - Python 3.11+
 - Okta organization with API access
 - Okta API token with read permissions
+- (Optional) Kandji/Iru tenant with API token for device audit
 - (Optional) Jira Service Management for offboarding workflow
 
 ## Setup
@@ -201,6 +218,18 @@ python okta_remediate.py --input okta_audit.csv --execute \
 
 **Note:** the API token needs `okta.users.manage` scope for lifecycle changes — a read-only token is not sufficient for `--execute`.
 
+### 7. Audit Device Fleet
+
+```bash
+# Against your Kandji/Iru tenant (needs KANDJI_URL + KANDJI_TOKEN env vars)
+python device_audit.py --stale-days 14 --min-os 14.0 --output device_audit.csv
+
+# No credentials needed — synthetic demo data
+python device_audit.py --demo --min-os 14.0 --output devices_demo.csv
+```
+
+**Note:** create the Kandji API token with only device-list read permission (Settings > Access > API Token) — least privilege.
+
 ## Sample CSV Output
 
 See `sample_audit_output.csv` for synthetic example data.
@@ -212,7 +241,7 @@ See `sample_audit_output.csv` for synthetic example data.
 Run the test suite locally:
 
 ```bash
-pytest test_okta_audit.py test_okta_remediate.py -v
+pytest test_okta_audit.py test_okta_remediate.py test_device_audit.py -v
 ```
 
 Tests cover:
